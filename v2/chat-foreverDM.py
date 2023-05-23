@@ -459,7 +459,7 @@ ctx = '''\nYou are the DM for a game that's a cross between Dungeons and Dragons
 delim = '##########'
 die=pd.read_csv('/root/foreverDM/newRollingTable.csv',index_col=None)
 
-TESTING_GUILD_ID = 123456789  # Replace with your guild ID
+TESTING_GUILD_ID = os.getenv('TESTING_GUILD_ID')  # Replace with your guild ID
 bot = commands.Bot()
 
 @bot.event
