@@ -215,9 +215,14 @@ def on_message(message,srv='dummy_server',FREE_GEN_LEN=256):
     msg = msg.strip()
     
     if msg == '+reset':
-        out = load_all_stat('', 'chat_init')
+        PROMPT_FILE = msg[8:].strip()
+        user, bot, interface, init_prompt = load_prompt(PROMPT_FILE)
+        out = run_rnn(fix_tokens(pipeline.encode(init_prompt)))
         save_all_stat(srv, 'chat', out)
-        reply_msg("Chat reset.")
+        print("Prompt set up.")
+        gc.collect()
+        torch.cuda.empty_cache()
+        reply_msg("Game reset.")
         return
     
     # use '+prompt {path}' to load a new prompt
