@@ -44,7 +44,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 ########################################################################################################
 
 # args.strategy = 'cpu fp32'
-args.strategy = 'cuda fp16'
+args.strategy = 'cuda fp16i8'
 # args.strategy = 'cuda:0 fp16 -> cuda:1 fp16'
 # args.strategy = 'cuda fp16i8 *10 -> cuda fp16'
 # args.strategy = 'cuda fp16i8'
@@ -52,7 +52,7 @@ args.strategy = 'cuda fp16'
 # args.strategy = 'cuda fp16i8 *10+'
 
 os.environ["RWKV_JIT_ON"] = '1' # '1' or '0', please use torch 1.13+ and benchmark speed
-os.environ["RWKV_CUDA_ON"] = '0' # '1' to compile CUDA kernel (10x faster), requires c++ compiler & cuda libraries
+os.environ["RWKV_CUDA_ON"] = '1' # '1' to compile CUDA kernel (10x faster), requires c++ compiler & cuda libraries
 
 CHAT_LANG = 'English' # English // Chinese // more to come
 
@@ -60,7 +60,7 @@ CHAT_LANG = 'English' # English // Chinese // more to come
 # Use '/' in model path, instead of '\'
 # Use convert_model.py to convert a model for a strategy, for faster loading & saves CPU RAM 
 if CHAT_LANG == 'English':
-    args.MODEL_NAME = '/root/foreverDM/merged_models/models--beingPurple--foreverDM/snapshots/86b8a772e2bc8a6338366e647ec5ca83f4c2f017/actionToStory-raven-7B.pth'
+    args.MODEL_NAME = './models/models--beingPurple--foreverDM/snapshots/86b8a772e2bc8a6338366e647ec5ca83f4c2f017/actionToStory-raven-7B.pth'
     # args.MODEL_NAME = '/fsx/BlinkDL/HF-MODEL/rwkv-4-raven/RWKV-4-Raven-7B-v10-Eng99%-Other1%-20230418-ctx8192'
     # args.MODEL_NAME = '/fsx/BlinkDL/HF-MODEL/rwkv-4-pile-14b/RWKV-4-Pile-14B-20230313-ctx8192-test1050'
 
@@ -191,10 +191,8 @@ for s in srv_list:
 def reply_msg(msg):
     print(f'{bot}{interface} {msg}\n')
 
-def on_message(message,FREE_GEN_LEN=256):
+def on_message(message,srv='dummy_server',FREE_GEN_LEN=256):
     global model_tokens, model_state, user, bot, interface, init_prompt
-
-    srv = 'dummy_server'
 
     msg = message.replace('\\n','\n').strip()
 
@@ -453,21 +451,52 @@ print(f'{pipeline.decode(model_tokens)}'.replace(f'\n\n{bot}',f'\n{bot}'), end='
 
 ########################################################################################################
 
+import nextcord
+from nextcord.ext import commands
+
 ctx = '''\nYou are the DM for a game that's a cross between Dungeons and Dragons and a choose-your-own-adventure game. You will be given an action and a sentence about how that action goes. You will send me an immersive and detailed response describing how the action went for [char].
 ### Input:'''
-
 delim = '##########'
-
 die=pd.read_csv('/root/foreverDM/newRollingTable.csv',index_col=None)
 
+TESTING_GUILD_ID = os.getenv('TESTING_GUILD_ID')  # Replace with your guild ID
+bot = commands.Bot()
 
-while True:
+@bot.event
+async def on_ready():
+    print(f'We have logged in as {bot.user}')
+
+@bot.slash_command(description="Roll for a response from foreverDM!", guild_ids=[TESTING_GUILD_ID])
+async def DM(interaction: nextcord.Interaction):
     r=random.randint(0,19)
     roll=die['sentence'][r]
-    msg = prompt(f'{user}{interface}{ctx} ')
+    msg = prompt(f'{user}{interface}{ctx} {nextcord.Interaction.original_message()}')
     result = f'result: {roll}'
     print(result)
     if len(msg.strip()) > 0:
-        on_message(msg + result,FREE_GEN_LEN = 100)
+        await interaction.send(on_message(msg + result,
+                                          srv=nextcord.Interaction.user,
+                                          FREE_GEN_LEN = 100)
+                               )
     else:
         print('Error: please say something')
+    # await interaction.send("Hello!")
+    
+# @bot.listen()
+# async def on_message(message):
+#     print('one')
+
+bot.run('your token here')
+
+
+# while True:
+#     r=random.randint(0,19)
+#     roll=die['sentence'][r]
+#     msg = prompt(f'{user}{interface}{ctx} ')
+#     result = f'result: {roll}'
+#     print(result)
+#     if len(msg.strip()) > 0:
+#         on_message(msg + result,FREE_GEN_LEN = 100)
+#     else:
+#         print('Error: please say something')
+
