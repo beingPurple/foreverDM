@@ -337,6 +337,8 @@ Below is an instruction that describes a task. Write a response that appropriate
             
             xxx = pipeline.decode(model_tokens[out_last:])
             if '\ufffd' not in xxx: # avoid utf-8 display issues
+                if '#' in xxx:
+                    break
                 print(xxx, end='', flush=True)
                 out_last = begin + i + 1
                 if i >= FREE_GEN_LEN:
