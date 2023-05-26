@@ -44,7 +44,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 ########################################################################################################
 
 # args.strategy = 'cpu fp32'
-args.strategy = 'cuda fp16i8'
+args.strategy = 'cuda fp16'
 # args.strategy = 'cuda:0 fp16 -> cuda:1 fp16'
 # args.strategy = 'cuda fp16i8 *10 -> cuda fp16'
 # args.strategy = 'cuda fp16i8'
@@ -52,7 +52,7 @@ args.strategy = 'cuda fp16i8'
 # args.strategy = 'cuda fp16i8 *10+'
 
 os.environ["RWKV_JIT_ON"] = '1' # '1' or '0', please use torch 1.13+ and benchmark speed
-os.environ["RWKV_CUDA_ON"] = '1' # '1' to compile CUDA kernel (10x faster), requires c++ compiler & cuda libraries
+os.environ["RWKV_CUDA_ON"] = '0' # '1' to compile CUDA kernel (10x faster), requires c++ compiler & cuda libraries
 
 CHAT_LANG = 'English' # English // Chinese // more to come
 
@@ -60,7 +60,7 @@ CHAT_LANG = 'English' # English // Chinese // more to come
 # Use '/' in model path, instead of '\'
 # Use convert_model.py to convert a model for a strategy, for faster loading & saves CPU RAM 
 if CHAT_LANG == 'English':
-    args.MODEL_NAME = './models/models--beingPurple--foreverDM/snapshots/86b8a772e2bc8a6338366e647ec5ca83f4c2f017/actionToStory-raven-7B.pth'
+    args.MODEL_NAME = '/root/foreverDM/merged_models/models--beingPurple--foreverDM/snapshots/86b8a772e2bc8a6338366e647ec5ca83f4c2f017/actionToStory-raven-7B.pth'
     # args.MODEL_NAME = '/fsx/BlinkDL/HF-MODEL/rwkv-4-raven/RWKV-4-Raven-7B-v10-Eng99%-Other1%-20230418-ctx8192'
     # args.MODEL_NAME = '/fsx/BlinkDL/HF-MODEL/rwkv-4-pile-14b/RWKV-4-Pile-14B-20230313-ctx8192-test1050'
 
@@ -163,8 +163,13 @@ def save_all_stat(srv, name, last_out):
 def load_all_stat(srv, name):
     global model_tokens, model_state
     n = f'{name}_{srv}'
-    model_state = copy.deepcopy(all_state[n]['rnn'])
-    model_tokens = copy.deepcopy(all_state[n]['token'])
+    try:
+        model_state = copy.deepcopy(all_state[n]['rnn'])
+        model_tokens = copy.deepcopy(all_state[n]['token'])
+    except:
+        n = n = f"{name}_"
+        model_state = copy.deepcopy(all_state[n]['rnn'])
+        model_tokens = copy.deepcopy(all_state[n]['token'])
     return all_state[n]['out']
 
 # Model only saw '\n\n' as [187, 187] before, but the tokenizer outputs [535] for it at the end
@@ -183,19 +188,17 @@ out = run_rnn(fix_tokens(pipeline.encode(init_prompt)))
 save_all_stat('', 'chat_init', out)
 gc.collect()
 torch.cuda.empty_cache()
-
-srv_list = ['dummy_server']
+srv = 'dummy_server'
+srv_list = [srv]
 for s in srv_list:
     save_all_stat(s, 'chat', out)
-
 def reply_msg(msg):
     print(f'{bot}{interface} {msg}\n')
 
-def on_message(message,srv='dummy_server',FREE_GEN_LEN=256):
-    global model_tokens, model_state, user, bot, interface, init_prompt
-
+def on_message(message,srv,FREE_GEN_LEN=256):
+    
+    global model_tokens, model_state, user, bot, interface, init_prompt, tokenString
     msg = message.replace('\\n','\n').strip()
-
     x_temp = GEN_TEMP
     x_top_p = GEN_TOP_P
     if ("-temp=" in msg):
@@ -218,79 +221,105 @@ def on_message(message,srv='dummy_server',FREE_GEN_LEN=256):
         out = load_all_stat('', 'chat_init')
         save_all_stat(srv, 'chat', out)
         reply_msg("Chat reset.")
+        
         return
     
     # use '+prompt {path}' to load a new prompt
-    elif msg[:8].lower() == '+prompt ':
-        print("Loading prompt...")
-        try:
-            PROMPT_FILE = msg[8:].strip()
-            user, bot, interface, init_prompt = load_prompt(PROMPT_FILE)
-            out = run_rnn(fix_tokens(pipeline.encode(init_prompt)))
-            save_all_stat(srv, 'chat', out)
-            print("Prompt set up.")
-            gc.collect()
-            torch.cuda.empty_cache()
-        except:
-            print("Path error.")
+    # elif msg[:8].lower() == '+prompt ':
+    #     print("Loading prompt...")
+    #     try:
+    #         PROMPT_FILE = msg[8:].strip()
+    #         user, bot, interface, init_prompt = load_prompt(PROMPT_FILE)
+    #         out = run_rnn(fix_tokens(pipeline.encode(init_prompt)))
+    #         save_all_stat(srv, 'chat', out)
+    #         print("Prompt set up.")
+            
+    #         gc.collect()
+    #         torch.cuda.empty_cache()
+    #     except:
+    #         print("Path error.")
 
     elif msg[:5].lower() == '+gen ' or msg[:3].lower() == '+i ' or msg[:4].lower() == '+qa ' or msg[:4].lower() == '+qq ' or msg.lower() == '+++' or msg.lower() == '++':
 
-        if msg[:5].lower() == '+gen ':
-            new = '\n' + msg[5:].strip()
-            # print(f'### prompt ###\n[{new}]')
-            model_state = None
-            model_tokens = []
-            out = run_rnn(pipeline.encode(new))
-            save_all_stat(srv, 'gen_0', out)
+        # if msg[:5].lower() == '+gen ':
+        #     new = '\n' + msg[5:].strip()
+        #     # print(f'### prompt ###\n[{new}]')
+        #     model_state = None
+        #     model_tokens = []
+        #     out = run_rnn(pipeline.encode(new))
+        #     save_all_stat(srv, 'gen_0', out)
+        #     begin = len(model_tokens)
+        #     output = pipeline.decode(model_tokens[begin:]).strip()
+            # return output
+            
 
-        elif msg[:3].lower() == '+i ':
+        if msg[:3].lower() == '+i ':
             msg = msg[3:].strip().replace('\r\n','\n').replace('\n\n','\n')
             new = f'''
-Below is an instruction that describes a task. Write a response that appropriately completes the request.
-
-# Instruction:
+Below is a request from the related to the game so far. Write a response that appropriately completes the request.
+###Instruction:
 {msg}
-
-# Response:
+###Response:
 '''
             # print(f'### prompt ###\n[{new}]')
+            out = load_all_stat(srv, 'chat')
             model_state = None
             model_tokens = []
+            print(new)
             out = run_rnn(pipeline.encode(new))
             save_all_stat(srv, 'gen_0', out)
-
-        elif msg[:4].lower() == '+qq ':
-            new = '\nQ: ' + msg[4:].strip() + '\nA:'
-            # print(f'### prompt ###\n[{new}]')
-            model_state = None
-            model_tokens = []
-            out = run_rnn(pipeline.encode(new))
-            save_all_stat(srv, 'gen_0', out)
-
-        elif msg[:4].lower() == '+qa ':
-            out = load_all_stat('', 'chat_init')
-
-            real_msg = msg[4:].strip()
-            new = f"{user}{interface} {real_msg}\n\n{bot}{interface}"
-            # print(f'### qa ###\n[{new}]')
+            begin = len(model_tokens)
             
+            output = pipeline.decode(model_tokens[begin:]).strip()
+            # return output
+            
+        # elif msg[:4].lower() == '+qq ':
+        #     new = '\nQ: ' + msg[4:].strip() + '\nA:'
+        #     # print(f'### prompt ###\n[{new}]')
+        #     model_state = None
+        #     model_tokens = []
+        #     out = run_rnn(pipeline.encode(new))
+        #     save_all_stat(srv, 'gen_0', out)
+        #     begin = len(model_tokens)
+        #     output = pipeline.decode(model_tokens[begin:]).strip()
+            # return output
+            
+        elif msg[:4].lower() == '+qa ':
+            out = load_all_stat(srv, 'chat')
+            real_msg = msg[4:].strip()
+            ins = '\nThe player has a question about the game so far. Provide a response that answers the question.'
+            new = f"{ins} {user}{interface}{real_msg}\n\n{bot}{interface}"
+            print(new)
             out = run_rnn(pipeline.encode(new))
             save_all_stat(srv, 'gen_0', out)
+            begin = len(model_tokens)
+            
+            output = pipeline.decode(model_tokens[begin:]).strip()
+            # return output
 
         elif msg.lower() == '+++':
             try:
                 out = load_all_stat(srv, 'gen_1')
                 save_all_stat(srv, 'gen_0', out)
+                
             except:
-                return
+                out = load_all_stat('', 'gen_1')
+                save_all_stat(srv, 'gen_0', out)
+            begin = len(model_tokens)
+            
+            output = pipeline.decode(model_tokens[begin:]).strip()
+            # return output
 
         elif msg.lower() == '++':
             try:
                 out = load_all_stat(srv, 'gen_0')
+                
             except:
                 return
-
+            begin = len(model_tokens)
+            
+            output = pipeline.decode(model_tokens[begin:]).strip()
+            return output
         begin = len(model_tokens)
         out_last = begin
         occurrence = {}
@@ -311,11 +340,16 @@ Below is an instruction that describes a task. Write a response that appropriate
 
             if msg[:4].lower() == '+qa ':# or msg[:4].lower() == '+qq ':
                 out = run_rnn([token], newline_adj=-2)
+                save_all_stat(srv, 'chat', out)
             else:
                 out = run_rnn([token])
             
             xxx = pipeline.decode(model_tokens[out_last:])
             if '\ufffd' not in xxx: # avoid utf-8 display issues
+                if '#' in xxx:
+                    out = ''
+                    xxx=''
+                    break
                 print(xxx, end='', flush=True)
                 out_last = begin + i + 1
                 if i >= FREE_GEN_LEN:
@@ -324,25 +358,32 @@ Below is an instruction that describes a task. Write a response that appropriate
         # send_msg = pipeline.decode(model_tokens[begin:]).strip()
         # print(f'### send ###\n[{send_msg}]')
         # reply_msg(send_msg)
-        save_all_stat(srv, 'gen_1', out)
+        save_all_stat(srv, 'chat', out)
+        
+        output = pipeline.decode(model_tokens[begin:]).strip()
+        return output
 
     else:
-        if msg.lower() == '+':
-            try:
-                out = load_all_stat(srv, 'chat_pre')
-            except:
-                return
-        else:
+        # if msg.lower() == '+':
+        #     try:
+        #         out = load_all_stat(srv, 'chat_pre')
+        #     except:
+        #         return
+        # else:
+        try:
             out = load_all_stat(srv, 'chat')
-            msg = msg.strip().replace('\r\n','\n').replace('\n\n','\n')
-            new = f"{user}{interface} {msg}\n\n{bot}{interface}"
-            # print(f'### add ###\n[{new}]')
-            out = run_rnn(pipeline.encode(new), newline_adj=-999999999)
-            save_all_stat(srv, 'chat_pre', out)
+        except:
+            out = load_all_stat('', 'chat_init')
+        msg = msg.strip().replace('\r\n','\n').replace('\n\n','\n')
+        new = f"{msg}\n\n{bot}{interface}"            
+        # print(f'### add ###\n[{new}]')
+        print(new, end='', flush=True)
+        out = run_rnn(pipeline.encode(new), newline_adj=-999999999)
+        save_all_stat(srv, 'chat_pre', out)
 
         begin = len(model_tokens)
         out_last = begin
-        print(f'{bot}{interface}', end='', flush=True)
+        # print(f'{bot}{interface}', end='', flush=True)
         occurrence = {}
         for i in range(999):
             if i <= 0:
@@ -373,6 +414,10 @@ Below is an instruction that describes a task. Write a response that appropriate
 
             xxx = pipeline.decode(model_tokens[out_last:])
             if '\ufffd' not in xxx: # avoid utf-8 display issues
+                if '#' in xxx:
+                    out = ''
+                    xxx=''
+                    break
                 print(xxx, end='', flush=True)
                 out_last = begin + i + 1
             
@@ -395,7 +440,9 @@ Below is an instruction that describes a task. Write a response that appropriate
         # print(f'### send ###\n[{send_msg}]')
         # reply_msg(send_msg)
         save_all_stat(srv, 'chat', out)
-
+        
+        output = pipeline.decode(model_tokens[begin:]).strip()
+        return output
 ########################################################################################################
 
 if CHAT_LANG == 'English':
@@ -451,52 +498,21 @@ print(f'{pipeline.decode(model_tokens)}'.replace(f'\n\n{bot}',f'\n{bot}'), end='
 
 ########################################################################################################
 
-import nextcord
-from nextcord.ext import commands
-
-ctx = '''\nYou are the DM for a game that's a cross between Dungeons and Dragons and a choose-your-own-adventure game. You will be given an action and a sentence about how that action goes. You will send me an immersive and detailed response describing how the action went for [char].
-### Input:'''
-delim = '##########'
-die=pd.read_csv('/root/foreverDM/newRollingTable.csv',index_col=None)
-
-TESTING_GUILD_ID = os.getenv('TESTING_GUILD_ID')  # Replace with your guild ID
-bot = commands.Bot()
-
-@bot.event
-async def on_ready():
-    print(f'We have logged in as {bot.user}')
-
-@bot.slash_command(description="Roll for a response from foreverDM!", guild_ids=[TESTING_GUILD_ID])
-async def DM(interaction: nextcord.Interaction):
-    r=random.randint(0,19)
-    roll=die['sentence'][r]
-    msg = prompt(f'{user}{interface}{ctx} {nextcord.Interaction.original_message()}')
-    result = f'result: {roll}'
-    print(result)
-    if len(msg.strip()) > 0:
-        await interaction.send(on_message(msg + result,
-                                          srv=nextcord.Interaction.user,
-                                          FREE_GEN_LEN = 100)
-                               )
-    else:
-        print('Error: please say something')
-    # await interaction.send("Hello!")
-    
-# @bot.listen()
-# async def on_message(message):
-#     print('one')
-
-bot.run('your token here')
-
-
-# while True:
-#     r=random.randint(0,19)
-#     roll=die['sentence'][r]
-#     msg = prompt(f'{user}{interface}{ctx} ')
-#     result = f'result: {roll}'
-#     print(result)
-#     if len(msg.strip()) > 0:
-#         on_message(msg + result,FREE_GEN_LEN = 100)
-#     else:
-#         print('Error: please say something')
-
+#ctx = '''\nYou are the DM for a game that's a cross between Dungeons and Dragons and a choose-your-own-adventure game. You will be given an action and a sentence about how that action goes. You will send me an immersive and detailed response describing how the action went for [char].
+#### Input:'''
+#
+#delim = '##########'
+#
+#die=pd.read_csv('/root/foreverDM/newRollingTable.csv',index_col=None)
+#
+#
+#while True:
+#    r=random.randint(0,19)
+#    roll=die['sentence'][r]
+#    msg = prompt(f'{user}{interface}{ctx} ')
+#    result = f'result: {roll}'
+#    print(result)
+#    if len(msg.strip()) > 0:
+#        on_message(msg + result,FREE_GEN_LEN = 100)
+#    else:
+#        print('Error: please say something')
